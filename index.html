@@ -15,10 +15,10 @@ h3{margin:10px 0;color:#333;border-bottom:2px solid #eee;padding-bottom:5px}
 button{border:0;border-radius:10px;padding:15px 5px;font-size:16px;font-weight:bold;background:#007aff;color:#fff}
 button.active{background:#28a745} button:active{transform:scale(.96)}
 .level{text-align:center;margin:25px 0}
-#db-display{font-size:60px;font-weight:bold;color:#222}.unit{font-size:22px;color:#666}
-.ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ctrl{background:#6c757d}
-.channel{margin-top:25px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.chbtn.off{background:#777}.chbtn.on{background:#28a745}
+#db-display{font-size:60px;font-weight:bold}.unit{font-size:22px;color:#666}
+.ctrl-grid,.channel{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ctrl{background:#6c757d}.channel{margin-top:15px}
+.chbtn.on{background:#28a745}.chbtn.off{background:#777}
 .stop{margin-top:25px;width:100%;background:#dc3545;font-size:20px}
 .info{margin-top:15px;text-align:center;color:#666;font-size:13px;line-height:1.5}
 </style>
@@ -27,6 +27,7 @@ button.active{background:#28a745} button:active{transform:scale(.96)}
 <div class="container">
 <h3>Frequency (Hz)</h3>
 <div class="freq-grid" id="freq-grid"></div>
+
 <div class="level"><span id="db-display">0.0</span><span class="unit"> dB</span></div>
 <div class="ctrl-grid">
 <button class="ctrl" onclick="adjustLevel(1)">+1.0</button>
@@ -34,14 +35,17 @@ button.active{background:#28a745} button:active{transform:scale(.96)}
 <button class="ctrl" onclick="adjustLevel(.1)">+0.1</button>
 <button class="ctrl" onclick="adjustLevel(-.1)">-0.1</button>
 </div>
+
 <h3>Channel Output</h3>
 <div class="channel">
 <button id="l-btn" class="chbtn on" onclick="toggleChannel('L')">L : ON</button>
 <button id="r-btn" class="chbtn on" onclick="toggleChannel('R')">R : ON</button>
 </div>
+
 <button class="stop" onclick="stopAudio()">STOP</button>
-<div class="info">Independent L/R oscillator test version<br>7.5k = 7500 Hz</div>
+<div class="info">Stereo AudioBuffer version<br>L/R are written directly into separate buffer channels<br>7.5k = 7500 Hz</div>
 </div>
+
 <script>
 const frequencies=[
  {label:"50",hz:50},{label:"100",hz:100},{label:"400",hz:400},
@@ -49,9 +53,10 @@ const frequencies=[
  {label:"7.5k",hz:7500},{label:"10k",hz:10000},{label:"15k",hz:15000}
 ];
 
-let audioCtx=null, selected=null, currentDb=0;
-let lOn=true, rOn=true;
-let lOsc=null, rOsc=null, lGain=null, rGain=null, merger=null;
+let ctx=null, source=null, selected=null;
+let currentDb=0, lOn=true, rOn=true;
+const sampleRate=48000;
+const duration=2;
 
 const grid=document.getElementById("freq-grid");
 frequencies.forEach(item=>{
@@ -63,34 +68,44 @@ frequencies.forEach(item=>{
 });
 
 async function initAudio(){
- if(!audioCtx){
+ if(!ctx){
    const AC=window.AudioContext||window.webkitAudioContext;
-   audioCtx=new AC({latencyHint:"interactive"});
+   ctx=new AC({sampleRate:sampleRate,latencyHint:"interactive"});
  }
- if(audioCtx.state!=="running") await audioCtx.resume();
+ if(ctx.state!=="running") await ctx.resume();
 }
 
-function amp(){ return Math.pow(10,currentDb/20); }
+function createStereoBuffer(freq){
+ const frames=Math.round(ctx.sampleRate*duration);
+ const buffer=ctx.createBuffer(2,frames,ctx.sampleRate);
+ const left=buffer.getChannelData(0);
+ const right=buffer.getChannelData(1);
+ const gain=Math.pow(10,currentDb/20);
 
-function makeOsc(channel){
- const o=audioCtx.createOscillator();
- const g=audioCtx.createGain();
- o.type="sine";
- o.frequency.setValueAtTime(selected.hz,audioCtx.currentTime);
- g.gain.setValueAtTime(amp(),audioCtx.currentTime);
- o.connect(g);
- if(channel==="L") g.connect(merger,0,0);
- else g.connect(merger,0,1);
- o.start();
- if(channel==="L"){lOsc=o;lGain=g;} else {rOsc=o;rGain=g;}
+ for(let i=0;i<frames;i++){
+   const s=Math.sin(2*Math.PI*freq*i/ctx.sampleRate)*gain;
+   left[i]=lOn ? s : 0.0;
+   right[i]=rOn ? s : 0.0;
+ }
+ return buffer;
 }
 
-function kill(channel){
- let o=channel==="L"?lOsc:rOsc;
- let g=channel==="L"?lGain:rGain;
- if(o){try{o.stop()}catch(e){} try{o.disconnect()}catch(e){}}
- if(g){try{g.disconnect()}catch(e){}}
- if(channel==="L"){lOsc=null;lGain=null;} else {rOsc=null;rGain=null;}
+function stopSource(){
+ if(source){
+   try{source.stop()}catch(e){}
+   try{source.disconnect()}catch(e){}
+   source=null;
+ }
+}
+
+function rebuild(){
+ stopSource();
+ if(!selected||!ctx) return;
+ source=ctx.createBufferSource();
+ source.buffer=createStereoBuffer(selected.hz);
+ source.loop=true;
+ source.connect(ctx.destination);
+ source.start();
 }
 
 async function selectFrequency(item){
@@ -101,26 +116,20 @@ async function selectFrequency(item){
  rebuild();
 }
 
-function rebuild(){
- kill("L"); kill("R");
- if(merger){try{merger.disconnect()}catch(e){}}
- if(!selected||!audioCtx) return;
- merger=audioCtx.createChannelMerger(2);
- merger.connect(audioCtx.destination);
- if(lOn) makeOsc("L");
- if(rOn) makeOsc("R");
-}
-
 function toggleChannel(ch){
- if(ch==="L"){lOn=!lOn; if(lOn&&selected) makeOsc("L"); else kill("L");}
- else {rOn=!rOn; if(rOn&&selected) makeOsc("R"); else kill("R");}
+ if(ch==="L") lOn=!lOn;
+ else rOn=!rOn;
  updateButtons();
+ if(selected) rebuild();
 }
 
 function updateButtons(){
- const lb=document.getElementById("l-btn"), rb=document.getElementById("r-btn");
- lb.textContent="L : "+(lOn?"ON":"OFF"); lb.className="chbtn "+(lOn?"on":"off");
- rb.textContent="R : "+(rOn?"ON":"OFF"); rb.className="chbtn "+(rOn?"on":"off");
+ const lb=document.getElementById("l-btn");
+ const rb=document.getElementById("r-btn");
+ lb.textContent="L : "+(lOn?"ON":"OFF");
+ rb.textContent="R : "+(rOn?"ON":"OFF");
+ lb.className="chbtn "+(lOn?"on":"off");
+ rb.className="chbtn "+(rOn?"on":"off");
 }
 
 function adjustLevel(v){
@@ -128,20 +137,17 @@ function adjustLevel(v){
  if(n<-20||n>0) return;
  currentDb=n;
  document.getElementById("db-display").textContent=n===0?"0.0":n.toFixed(1);
- const now=audioCtx?audioCtx.currentTime:0;
- if(lGain) lGain.gain.setValueAtTime(amp(),now);
- if(rGain) rGain.gain.setValueAtTime(amp(),now);
+ if(selected) rebuild();
 }
 
 function stopAudio(){
- kill("L"); kill("R");
- if(merger){try{merger.disconnect()}catch(e){} merger=null;}
+ stopSource();
  if(selected) document.getElementById("btn-"+selected.label)?.classList.remove("active");
  selected=null;
 }
 
 document.addEventListener("visibilitychange",async()=>{
- if(document.visibilityState==="visible"&&audioCtx) await audioCtx.resume();
+ if(document.visibilityState==="visible"&&ctx) await ctx.resume();
 });
 </script>
 </body>
