@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FM Signal">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>FM Audio Signal Generator</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;padding:20px;background:#f0f2f5;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;user-select:none}
+.container{max-width:420px;margin:auto;background:white;padding:20px;border-radius:18px;box-shadow:0 4px 12px rgba(0,0,0,.15)}
+h3{margin:10px 0;color:#333;border-bottom:2px solid #eee;padding-bottom:5px}
+.freq-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+button{border:0;border-radius:10px;padding:15px 5px;font-size:16px;font-weight:bold;background:#007aff;color:white}
+button.active{background:#28a745} button:active{transform:scale(.96)}
+.level{text-align:center;margin:25px 0}
+#dbm-display{font-size:60px;font-weight:bold;color:#222}.unit{font-size:22px;color:#666}
+.ctrl-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.ctrl{background:#6c757d}
+.channel{margin-top:25px;display:flex;justify-content:space-around;background:#f8f9fa;padding:15px;border-radius:10px}
+.channel label{font-size:18px;font-weight:bold}.channel input{width:22px;height:22px}
+.stop{margin-top:25px;width:100%;background:#dc3545;font-size:20px}
+.info{margin-top:15px;text-align:center;color:#666;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+<h3>Frequency (Hz)</h3>
+<div class="freq-grid" id="freq-grid"></div>
+<div class="level"><span id="dbm-display">0.0</span><span class="unit"> dB</span></div>
+<div class="ctrl-grid">
+<button class="ctrl" onclick="adjustLevel(1)">+1.0</button>
+<button class="ctrl" onclick="adjustLevel(-1)">-1.0</button>
+<button class="ctrl" onclick="adjustLevel(.1)">+0.1</button>
+<button class="ctrl" onclick="adjustLevel(-.1)">-0.1</button>
+</div>
+<h3>Channel Output</h3>
+<div class="channel">
+<label><input id="l-ch" type="checkbox" checked> L</label>
+<label><input id="r-ch" type="checkbox" checked> R</label>
+</div>
+<button class="stop" onclick="stopAudio()">STOP</button>
+<div class="info">FM Test Signal Generator / iPhone Safari</div>
+</div>
+<script>
+const frequencies=[
+ {label:"50",hz:50},{label:"100",hz:100},{label:"400",hz:400},
+ {label:"1k",hz:1000},{label:"3k",hz:3000},{label:"5k",hz:5000},
+ {label:"7.5k",hz:7500},{label:"10k",hz:10000},{label:"15k",hz:15000}
+];
+let currentDb=0, selected=null, audioCtx=null, osc=null, master=null, lGain=null, rGain=null, merger=null;
+
+const grid=document.getElementById("freq-grid");
+frequencies.forEach(item=>{
+ const b=document.createElement("button");
+ b.textContent=item.label+"Hz"; b.id="btn-"+item.label;
+ b.onclick=()=>selectFrequency(item);
+ grid.appendChild(b);
+});
+
+async function initAudio(){
+ if(!audioCtx){
+   const AC=window.AudioContext||window.webkitAudioContext;
+   audioCtx=new AC({latencyHint:"interactive"});
+ }
+ if(audioCtx.state!=="running") await audioCtx.resume();
+}
+
+async function selectFrequency(item){
+ await initAudio();
+ if(selected) document.getElementById("btn-"+selected.label)?.classList.remove("active");
+ selected=item;
+ document.getElementById("btn-"+item.label).classList.add("active");
+ playAudio();
+}
+
+function adjustLevel(v){
+ const n=Math.round((currentDb+v)*10)/10;
+ if(n<-20||n>0) return; // digital full scaleを超えない
+ currentDb=n;
+ document.getElementById("dbm-display").textContent=n===0?"0.0":n.toFixed(1);
+ if(master) updateGain();
+}
+
+function playAudio(){
+ stopSource();
+ if(!selected||!audioCtx) return;
+
+ osc=audioCtx.createOscillator();
+ master=audioCtx.createGain();
+ lGain=audioCtx.createGain();
+ rGain=audioCtx.createGain();
+ merger=audioCtx.createChannelMerger(2);
+
+ osc.type="sine";
+ osc.frequency.setValueAtTime(selected.hz,audioCtx.currentTime);
+
+ osc.connect(master);
+ master.connect(lGain);
+ master.connect(rGain);
+ lGain.connect(merger,0,0);
+ rGain.connect(merger,0,1);
+ merger.connect(audioCtx.destination);
+
+ updateGain();
+ updateChannels();
+ osc.start();
+}
+
+function updateGain(){
+ if(!master||!audioCtx) return;
+ const gain=Math.pow(10,currentDb/20);
+ master.gain.cancelScheduledValues(audioCtx.currentTime);
+ master.gain.setValueAtTime(gain,audioCtx.currentTime);
+}
+
+function updateChannels(){
+ if(!lGain||!rGain||!audioCtx) return;
+ const now=audioCtx.currentTime;
+ lGain.gain.cancelScheduledValues(now);
+ rGain.gain.cancelScheduledValues(now);
+ lGain.gain.setValueAtTime(document.getElementById("l-ch").checked?1:0,now);
+ rGain.gain.setValueAtTime(document.getElementById("r-ch").checked?1:0,now);
+}
+document.getElementById("l-ch").addEventListener("change",updateChannels);
+document.getElementById("r-ch").addEventListener("change",updateChannels);
+
+function stopSource(){
+ if(osc){try{osc.stop()}catch(e){} try{osc.disconnect()}catch(e){} osc=null;}
+}
+function stopAudio(){
+ stopSource();
+ if(selected) document.getElementById("btn-"+selected.label)?.classList.remove("active");
+ selected=null;
+}
+document.addEventListener("visibilitychange",async()=>{
+ if(document.visibilityState==="visible"&&audioCtx) await audioCtx.resume();
+});
+</script>
+</body>
+</html>
