@@ -28,6 +28,10 @@ button.active{background:#28a745} button:active{transform:scale(.96)}
 <div class="freq-grid" id="freq-grid"></div>
 <div class="level"><span id="db-display">0.0</span><span class="unit"> dBm</span></div>
 <div class="ctrl-grid">
+<button class="ctrl" onclick="adjustLevel(10)">+10.0</button>
+<button class="ctrl" onclick="adjustLevel(-10)">-10.0</button>
+<button class="ctrl" onclick="adjustLevel(5)">+5.0</button>
+<button class="ctrl" onclick="adjustLevel(-5)">-5.0</button>
 <button class="ctrl" onclick="adjustLevel(1)">+1.0</button>
 <button class="ctrl" onclick="adjustLevel(-1)">-1.0</button>
 <button class="ctrl" onclick="adjustLevel(.1)">+0.1</button>
@@ -122,8 +126,9 @@ function updateButtons(){
  rb.className="chbtn "+(rOn?"on":"off");
 }
 function adjustLevel(v){
- const n=Math.round((currentDbm+v)*10)/10;
- if(n<-10.0||n>9.1)return;
+ let n=Math.round((currentDbm+v)*10)/10;
+ if(n>9.1)n=9.1;
+ if(n<-10.0)n=-10.0;
  currentDbm=n;
  document.getElementById("db-display").textContent=(n>0?"+":"")+n.toFixed(1);
  if(selected)rebuild();
