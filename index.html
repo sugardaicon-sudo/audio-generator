@@ -20,32 +20,26 @@ button.active{background:#28a745} button:active{transform:scale(.96)}
 .ctrl{background:#6c757d}.channel{margin-top:15px}
 .chbtn.on{background:#28a745}.chbtn.off{background:#777}
 .stop{margin-top:25px;width:100%;background:#dc3545;font-size:20px}
-.info{margin-top:15px;text-align:center;color:#666;font-size:13px;line-height:1.5}
 </style>
 </head>
 <body>
 <div class="container">
 <h3>Frequency (Hz)</h3>
 <div class="freq-grid" id="freq-grid"></div>
-
-<div class="level"><span id="db-display">0.0</span><span class="unit"> dB</span></div>
+<div class="level"><span id="db-display">0.0</span><span class="unit"> dBm</span></div>
 <div class="ctrl-grid">
 <button class="ctrl" onclick="adjustLevel(1)">+1.0</button>
 <button class="ctrl" onclick="adjustLevel(-1)">-1.0</button>
 <button class="ctrl" onclick="adjustLevel(.1)">+0.1</button>
 <button class="ctrl" onclick="adjustLevel(-.1)">-0.1</button>
 </div>
-
 <h3>Channel Output</h3>
 <div class="channel">
 <button id="l-btn" class="chbtn on" onclick="toggleChannel('L')">L : ON</button>
 <button id="r-btn" class="chbtn on" onclick="toggleChannel('R')">R : ON</button>
 </div>
-
 <button class="stop" onclick="stopAudio()">STOP</button>
-
 </div>
-
 <script>
 const frequencies=[
  {label:"50",hz:50},{label:"100",hz:100},{label:"200",hz:200},
@@ -55,7 +49,8 @@ const frequencies=[
 ];
 
 let ctx=null, source=null, selected=null;
-let currentDb=0, lOn=true, rOn=true;
+let currentDbm=0, lOn=true, rOn=true;
+const calibrationDb=9.1; // measured: digital -9.1 dB = 0 dBm
 const sampleRate=48000;
 const duration=2;
 
@@ -81,12 +76,12 @@ function createStereoBuffer(freq){
  const buffer=ctx.createBuffer(2,frames,ctx.sampleRate);
  const left=buffer.getChannelData(0);
  const right=buffer.getChannelData(1);
- const gain=Math.pow(10,currentDb/20);
-
+ const digitalDb=currentDbm-calibrationDb;
+ const gain=Math.pow(10,digitalDb/20);
  for(let i=0;i<frames;i++){
    const s=Math.sin(2*Math.PI*freq*i/ctx.sampleRate)*gain;
-   left[i]=lOn ? s : 0.0;
-   right[i]=rOn ? s : 0.0;
+   left[i]=lOn?s:0.0;
+   right[i]=rOn?s:0.0;
  }
  return buffer;
 }
@@ -98,57 +93,48 @@ function stopSource(){
    source=null;
  }
 }
-
 function rebuild(){
  stopSource();
- if(!selected||!ctx) return;
+ if(!selected||!ctx)return;
  source=ctx.createBufferSource();
  source.buffer=createStereoBuffer(selected.hz);
  source.loop=true;
  source.connect(ctx.destination);
  source.start();
 }
-
 async function selectFrequency(item){
  await initAudio();
- if(selected) document.getElementById("btn-"+selected.label)?.classList.remove("active");
+ if(selected)document.getElementById("btn-"+selected.label)?.classList.remove("active");
  selected=item;
  document.getElementById("btn-"+item.label).classList.add("active");
  rebuild();
 }
-
 function toggleChannel(ch){
- if(ch==="L") lOn=!lOn;
- else rOn=!rOn;
+ if(ch==="L")lOn=!lOn; else rOn=!rOn;
  updateButtons();
- if(selected) rebuild();
+ if(selected)rebuild();
 }
-
 function updateButtons(){
- const lb=document.getElementById("l-btn");
- const rb=document.getElementById("r-btn");
+ const lb=document.getElementById("l-btn"),rb=document.getElementById("r-btn");
  lb.textContent="L : "+(lOn?"ON":"OFF");
  rb.textContent="R : "+(rOn?"ON":"OFF");
  lb.className="chbtn "+(lOn?"on":"off");
  rb.className="chbtn "+(rOn?"on":"off");
 }
-
 function adjustLevel(v){
- const n=Math.round((currentDb+v)*10)/10;
- if(n<-20||n>0) return;
- currentDb=n;
- document.getElementById("db-display").textContent=n===0?"0.0":n.toFixed(1);
- if(selected) rebuild();
+ const n=Math.round((currentDbm+v)*10)/10;
+ if(n<-10.0||n>9.1)return;
+ currentDbm=n;
+ document.getElementById("db-display").textContent=(n>0?"+":"")+n.toFixed(1);
+ if(selected)rebuild();
 }
-
 function stopAudio(){
  stopSource();
- if(selected) document.getElementById("btn-"+selected.label)?.classList.remove("active");
+ if(selected)document.getElementById("btn-"+selected.label)?.classList.remove("active");
  selected=null;
 }
-
 document.addEventListener("visibilitychange",async()=>{
- if(document.visibilityState==="visible"&&ctx) await ctx.resume();
+ if(document.visibilityState==="visible"&&ctx)await ctx.resume();
 });
 </script>
 </body>
