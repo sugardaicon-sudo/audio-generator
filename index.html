@@ -128,7 +128,7 @@ function updateButtons(){
 function adjustLevel(v){
  let n=Math.round((currentDbm+v)*10)/10;
  if(n>9.1)n=9.1;
- if(n<-10.0)n=-10.0;
+ if(n<-30.0)n=-30.0;
  currentDbm=n;
  document.getElementById("db-display").textContent=(n>0?"+":"")+n.toFixed(1);
  if(selected)rebuild();
